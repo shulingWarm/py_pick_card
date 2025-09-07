@@ -16,7 +16,6 @@ class CardManager:
     
     def _load_data(self):
         if os.path.exists(DATA_FILE):
-            # 强制使用 UTF-8 编码读取文件
             with open(DATA_FILE, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 for row in reader:
@@ -29,7 +28,6 @@ class CardManager:
     
     def _load_ban_status(self):
         if os.path.exists(BAN_FILE):
-            # 强制使用 UTF-8 编码读取文件
             with open(BAN_FILE, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 for row in reader:
@@ -38,7 +36,6 @@ class CardManager:
                         self.ban_status[tag] = (status == '1')
     
     def _save_data(self):
-        # 强制使用 UTF-8 编码写入文件
         with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             for card in self.cards:
@@ -46,7 +43,6 @@ class CardManager:
                 writer.writerow(row)
     
     def _save_ban_status(self):
-        # 强制使用 UTF-8 编码写入文件
         with open(BAN_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             for tag, banned in self.ban_status.items():
@@ -87,11 +83,9 @@ class CardManager:
         return self._get_normalized_probability(name)
     
     def _get_normalized_probability(self, name):
-        # 计算概率时排除被禁用的卡牌
         total = self._get_total_weight(include_banned=False)
         _, card = self._find_card(name)
         
-        # 如果卡牌被禁用，概率为0
         if card is None or self._is_card_banned(card):
             return 0.0
         
@@ -101,10 +95,8 @@ class CardManager:
         return (card['weight'] / total) * 100
     
     def list_cards(self):
-        # 计算有效总权重（排除被禁用的卡牌）
         total_valid = self._get_total_weight(include_banned=False)
         
-        # 分离有效卡牌和被禁用的卡牌
         valid_cards = []
         banned_cards = []
         
@@ -112,7 +104,6 @@ class CardManager:
             banned = self._is_card_banned(card)
             tags = ', '.join(sorted(card['tags'])) if card['tags'] else '无'
             
-            # 计算概率（被禁用的卡牌概率为0）
             if banned:
                 prob = 0.0
                 banned_cards.append({
@@ -130,13 +121,9 @@ class CardManager:
                     'tags': tags
                 })
         
-        # 有效卡牌按概率从大到小排序
         valid_cards.sort(key=lambda x: x['probability'], reverse=True)
-        
-        # 被禁用的卡牌按权重从大到小排序
         banned_cards.sort(key=lambda x: x['weight'], reverse=True)
         
-        # 合并结果：有效卡牌在前，被禁用的卡牌在后
         return valid_cards + banned_cards
     
     def tag_card(self, name, tag):
@@ -158,15 +145,12 @@ class CardManager:
             self._save_data()
             return True
         
-        # 计算总权重时包括所有卡牌（包括被禁用的）
         total = self._get_total_weight(include_banned=True)
         others_weight = total - card['weight']
         
         if others_weight == 0:
-            # 唯一卡片，直接设置权重
             card['weight'] = 1.0
         else:
-            # 计算新权重: w = (p * others) / (100 - p)
             new_weight = (target_prob * others_weight) / (100.0 - target_prob)
             card['weight'] = max(0.0, new_weight)
         
@@ -193,7 +177,6 @@ class CardManager:
         else:
             if tag_weight == 0:
                 return False
-            # 计算调整系数: k = (p * other_weight) / (tag_weight * (100 - p))
             k = (target_prob * other_weight) / (tag_weight * (100.0 - target_prob))
             for card in tag_cards:
                 card['weight'] *= k
@@ -202,7 +185,6 @@ class CardManager:
         return True
     
     def pick_card(self, count=1):
-        # 只考虑未被屏蔽的卡牌
         valid_cards = []
         weights = []
         for card in self.cards:
@@ -214,16 +196,42 @@ class CardManager:
         if total <= 0:
             return None
         
-        # 抽取指定数量的卡牌
-        if count == 1:
+        # 确保每次抽取都是独立的
+        results = []
+        for _ in range(count):
             chosen = random.choices(valid_cards, weights=weights, k=1)[0]
-            return chosen['name']
+            results.append(chosen['name'])
+        
+        if count == 1:
+            return results[0]
         else:
-            results = []
-            for _ in range(count):
-                chosen = random.choices(valid_cards, weights=weights, k=1)[0]
-                results.append(chosen['name'])
             return results
+    
+    def delete_card(self, name):
+        """删除指定卡牌"""
+        idx, card = self._find_card(name)
+        if idx < 0:
+            return False
+        
+        del self.cards[idx]
+        self._save_data()
+        return True
+    
+    def test_randomness(self, card_name, trials=10000):
+        """测试特定卡牌的出现频率"""
+        count = 0
+        for _ in range(trials):
+            result = self.pick_card()
+            if result == card_name:
+                count += 1
+        
+        probability = count / trials * 100
+        expected = self._get_normalized_probability(card_name)
+        
+        print(f"测试结果: {card_name}")
+        print(f"预期概率: {expected:.4f}%")
+        print(f"实际频率: {probability:.4f}%")
+        print(f"差异: {abs(expected - probability):.4f}%")
     
     def ban_tag(self, tag, status):
         status = status.strip()
@@ -240,11 +248,13 @@ def main():
         print("请使用以下命令:")
         print("  -p, --pick [次数]: 随机抽取一张或多张卡 (默认1次)")
         print("  -a, --add [名称|权重]: 添加/更新卡牌")
+        print("  -d, --delete [名称]: 删除卡牌")
         print("  -l, --list: 列出所有卡牌")
         print("  -t, --tag [卡名|标签]: 给卡牌添加标签")
         print("  -s, --set [卡名|概率]: 设置卡牌归一化概率")
         print("  --tag-adjust [标签|概率]: 调整标签整体概率")
         print("  --ban-tag [标签|状态]: 屏蔽标签 (1=屏蔽, 0=不屏蔽)")
+        print("  --test [卡名|测试次数]: 测试卡牌出现频率")
         return
     
     manager = CardManager()
@@ -252,10 +262,8 @@ def main():
     
     try:
         if command in ['-p', '--pick']:
-            # 默认抽取1次
             count = 1
             
-            # 检查是否指定了抽取次数
             if len(sys.argv) >= 3:
                 try:
                     count = int(sys.argv[2])
@@ -266,7 +274,6 @@ def main():
                     print("错误: 无效的抽取次数")
                     return
             
-            # 抽取卡牌
             if count == 1:
                 card = manager.pick_card(count)
                 print(f"抽到了: {card}" if card else "卡池为空!")
@@ -288,17 +295,25 @@ def main():
             prob = manager.add_card(name, weight)
             print(f"卡牌 '{name}' 添加成功! 当前概率: {prob:.2f}%")
         
+        elif command in ['-d', '--delete']:
+            if len(sys.argv) < 3:
+                print("缺少参数，格式: --delete 名称")
+                return
+            name = sys.argv[2]
+            if manager.delete_card(name):
+                print(f"卡牌 '{name}' 已成功删除")
+            else:
+                print(f"错误: 卡牌 '{name}' 不存在")
+        
         elif command in ['-l', '--list']:
             cards = manager.list_cards()
             if not cards:
                 print("卡池为空")
                 return
             
-            # 打印表头
             print(f"{'名称':<25} {'权重':<10} {'概率(%)':<10} {'标签':<20}")
             print("-" * 70)
             
-            # 打印每张卡的信息
             for card in cards:
                 print(f"{card['name']:<25} {card['weight']:<10.2f} {card['probability']:<10.2f} {card['tags']}")
         
@@ -342,6 +357,13 @@ def main():
                 print(f"已{action}标签 '{tag}'")
             else:
                 print(f"错误: 无效的状态值 '{status}' (应为0或1)")
+        
+        elif command == '--test':
+            if len(sys.argv) < 3:
+                print("格式: --test 卡名|测试次数")
+                return
+            card_name, trials = sys.argv[2].split('|', 1)
+            manager.test_randomness(card_name, int(trials))
         
         else:
             print("未知命令")
